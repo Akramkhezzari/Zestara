@@ -225,7 +225,6 @@
       box-shadow: 0 6px 20px rgba(110,0,255,0.3);
     }
 
-    /* زر الإرسال الجديد بنفس نمط الأزرار النيون */
     .wallet-send-btn {
       flex: 1;
       padding: 12px;
@@ -613,7 +612,7 @@
       border-radius: 15px;
       font-size: 12px;
       z-index: 1000;
-      display: none; /* إخفاء حالة Firebase */
+      display: none;
     }
 
     .firebase-status.error {
@@ -634,6 +633,24 @@
     .price-loading {
       opacity: 0.7;
       font-style: italic;
+    }
+
+    .user-search-result {
+      background: var(--bg-lighter);
+      padding: 10px;
+      border-radius: 8px;
+      margin: 5px 0;
+      border: 1px solid var(--border-light);
+    }
+
+    .user-search-result.found {
+      border-color: var(--success);
+      background: rgba(38, 161, 123, 0.05);
+    }
+
+    .user-search-result.not-found {
+      border-color: var(--danger);
+      background: rgba(255, 71, 87, 0.05);
     }
   </style>
 </head>
@@ -800,7 +817,10 @@
 
           <div class="form-group">
             <label class="form-label">إلى معرف المستخدم</label>
-            <input type="text" class="form-input" id="sendToUserId" placeholder="أدخل معرف المستخدم">
+            <input type="text" class="form-input" id="sendToUserId" placeholder="أدخل معرف المستخدم" oninput="searchUser(this.value)">
+            <div id="userSearchResult" class="user-search-result" style="display:none">
+              <!-- نتائج البحث عن المستخدم -->
+            </div>
           </div>
 
           <div class="form-group">
@@ -908,7 +928,6 @@
     }
 
     function updateFirebaseStatus(isConnected) {
-      // تم إخفاء حالة Firebase كما طلبت
       const statusElement = document.getElementById('firebaseStatus');
       statusElement.style.display = 'none';
     }
@@ -1067,7 +1086,6 @@
       showWalletLoading();
       
       try {
-        // محاولة الاتصال بـ Firebase أولاً
         const connectionSuccess = await testFirebaseConnection();
         
         if (connectionSuccess) {
@@ -1079,6 +1097,9 @@
           await loadUserFromLocalStorage(userData);
           updateFirebaseStatus(false);
         }
+        
+        // بدء تحديث الرصيد كل 3 ثواني
+        startBalanceAutoRefresh();
         
       } catch (error) {
         console.error('❌ Error initializing user data:', error);
@@ -1117,21 +1138,17 @@
           console.log('✅ New user registered in Firebase:', userData.id);
           userBalances = { ...defaultBalances };
           
-          // حفظ نسخة محلية
           saveToLocalStorage(userData.id, newUser);
         } else {
           console.log('✅ User loaded from Firebase:', userData.id);
           const existingData = userDoc.data();
           
-          // جلب جميع الأرصدة من Firebase
           userBalances = existingData.wallets || { ...defaultBalances };
           
-          // جلب جميع المعاملات من Firebase
           const transactions = existingData.transactions || [];
           updateTransactionsList(transactions);
           
           console.log('📊 Balances from Firebase:', userBalances);
-          console.log('📋 Transactions from Firebase:', transactions);
         }
         
         await fetchLivePrices();
@@ -1172,6 +1189,207 @@
       }
       
       await fetchLivePrices();
+    }
+
+    // ========== تحديث الرصيد التلقائي كل 3 ثواني ==========
+    function startBalanceAutoRefresh() {
+      setInterval(async () => {
+        try {
+          if (db && currentUser.id) {
+            const userRef = db.collection('users').doc(currentUser.id.toString());
+            const userDoc = await userRef.get();
+            
+            if (userDoc.exists) {
+              const userData = userDoc.data();
+              const newBalances = userData.wallets || {};
+              
+              // تحديث الأرصدة إذا تغيرت
+              let balancesChanged = false;
+              Object.keys(newBalances).forEach(currency => {
+                if (newBalances[currency] !== userBalances[currency]) {
+                  balancesChanged = true;
+                  userBalances[currency] = newBalances[currency];
+                }
+              });
+              
+              if (balancesChanged) {
+                console.log('🔄 Balances updated from Firebase');
+                updateWalletsListRealTime();
+                updateTotalBalance();
+                updateTransferDropdowns();
+              }
+              
+              // تحديث المعاملات إذا كانت هناك معاملات جديدة
+              const transactions = userData.transactions || [];
+              if (transactions.length !== (userData._transactionsCount || 0)) {
+                updateTransactionsList(transactions);
+                userData._transactionsCount = transactions.length;
+              }
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error in auto-refresh:', error);
+        }
+      }, 3000); // كل 3 ثواني
+    }
+
+    // ========== البحث عن المستخدم ==========
+    async function searchUser(userId) {
+      const resultElement = document.getElementById('userSearchResult');
+      
+      if (!userId || userId.trim() === '') {
+        resultElement.style.display = 'none';
+        return;
+      }
+      
+      const targetUserId = userId.trim();
+      
+      // منع البحث عن النفس
+      if (parseInt(targetUserId) === currentUser.id) {
+        resultElement.innerHTML = '❌ لا يمكن إرسال الأموال لنفسك';
+        resultElement.className = 'user-search-result not-found';
+        resultElement.style.display = 'block';
+        return;
+      }
+      
+      try {
+        if (!db) {
+          resultElement.innerHTML = '❌ قاعدة البيانات غير متاحة';
+          resultElement.className = 'user-search-result not-found';
+          resultElement.style.display = 'block';
+          return;
+        }
+        
+        const userRef = db.collection('users').doc(targetUserId);
+        const userDoc = await userRef.get();
+        
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.username || 'مستخدم';
+          
+          resultElement.innerHTML = `✅ تم العثور على المستخدم: ${userName} (${targetUserId})`;
+          resultElement.className = 'user-search-result found';
+          resultElement.style.display = 'block';
+        } else {
+          resultElement.innerHTML = '❌ لم يتم العثور على المستخدم';
+          resultElement.className = 'user-search-result not-found';
+          resultElement.style.display = 'block';
+        }
+      } catch (error) {
+        console.error('❌ Error searching for user:', error);
+        resultElement.innerHTML = '❌ خطأ في البحث عن المستخدم';
+        resultElement.className = 'user-search-result not-found';
+        resultElement.style.display = 'block';
+      }
+    }
+
+    // ========== إرسال الأموال بين المستخدمين ==========
+    async function sendMoneyToUser(toUserId, currency, amount) {
+      showWalletLoading();
+      
+      try {
+        // التحقق من صحة البيانات
+        if (!toUserId || !currency || !amount) {
+          alert('❌ يرجى ملء جميع الحقول');
+          return;
+        }
+        
+        if (amount <= 0) {
+          alert('❌ يرجى إدخال مبلغ صحيح');
+          return;
+        }
+        
+        const senderBalance = userBalances[currency] || 0;
+        
+        if (senderBalance < amount) {
+          alert('❌ رصيدك غير كافي');
+          return;
+        }
+        
+        // التحقق من وجود المستخدم المستقبل
+        const receiverRef = db.collection('users').doc(toUserId);
+        const receiverDoc = await receiverRef.get();
+        
+        if (!receiverDoc.exists) {
+          alert('❌ المستخدم المستقبل غير موجود');
+          return;
+        }
+        
+        // منع الإرسال للنفس
+        if (parseInt(toUserId) === currentUser.id) {
+          alert('❌ لا يمكن إرسال الأموال لنفسك');
+          return;
+        }
+        
+        // بدء المعاملة في قاعدة البيانات
+        const transactionId = generateTransactionId();
+        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+        
+        // معاملة المرسل
+        const senderTransaction = {
+          id: transactionId,
+          type: 'send',
+          amount: amount,
+          currency: currency,
+          toUserId: toUserId,
+          description: `إرسال إلى ${toUserId}`,
+          timestamp: timestamp,
+          status: 'completed'
+        };
+        
+        // معاملة المستقبل
+        const receiverTransaction = {
+          id: transactionId,
+          type: 'receive',
+          amount: amount,
+          currency: currency,
+          fromUserId: currentUser.id,
+          description: `استلام من ${currentUser.id}`,
+          timestamp: timestamp,
+          status: 'completed'
+        };
+        
+        // تحديث أرصدة المرسل والمستقبل في نفس الوقت
+        const batch = db.batch();
+        
+        // تحديث رصيد المرسل
+        const senderRef = db.collection('users').doc(currentUser.id.toString());
+        batch.update(senderRef, {
+          [`wallets.${currency}`]: firebase.firestore.FieldValue.increment(-amount),
+          transactions: firebase.firestore.FieldValue.arrayUnion(senderTransaction),
+          lastUpdated: timestamp
+        });
+        
+        // تحديث رصيد المستقبل
+        batch.update(receiverRef, {
+          [`wallets.${currency}`]: firebase.firestore.FieldValue.increment(amount),
+          transactions: firebase.firestore.FieldValue.arrayUnion(receiverTransaction),
+          lastUpdated: timestamp
+        });
+        
+        // تنفيذ جميع التحديثات معاً
+        await batch.commit();
+        
+        // تحديث البيانات المحلية
+        userBalances[currency] = senderBalance - amount;
+        
+        // تحديث التخزين المحلي
+        updateLocalUserData();
+        
+        showCopyNotification(`✅ تم إرسال ${amount} ${currency} إلى المستخدم ${toUserId}`);
+        closeSendModal();
+        
+        updateWalletsListRealTime();
+        updateTotalBalance();
+        
+        console.log('✅ Money sent successfully:', { toUserId, currency, amount });
+        
+      } catch (error) {
+        console.error('❌ Error sending money:', error);
+        alert('حدث خطأ أثناء الإرسال: ' + error.message);
+      } finally {
+        hideWalletLoading();
+      }
     }
 
     // ========== دوال تحديث البيانات في Firebase ==========
@@ -1236,7 +1454,6 @@
 
       walletsList.innerHTML = '';
 
-      // عرض جميع العملات من قاعدة البيانات
       Object.entries(coinInfo).forEach(([symbol, info]) => {
         const balance = userBalances[symbol] || 0;
         const liveData = livePrices[symbol];
@@ -1308,7 +1525,6 @@
       toCurrency.innerHTML = '';
       sendFromCurrency.innerHTML = '';
       
-      // استخدام الأرصدة الحقيقية من قاعدة البيانات
       Object.entries(coinInfo).forEach(([symbol, info]) => {
         const balance = userBalances[symbol] || 0;
         const optionText = `${symbol} - رصيدك: ${formatBalance(balance, symbol)}`;
@@ -1338,7 +1554,7 @@
         return timeB - timeA;
       });
       
-      sortedTransactions.forEach(tx => {
+      sortedTransactions.slice(0, 10).forEach(tx => {
         const txElement = document.createElement('div');
         txElement.className = 'wallet-tx';
         
@@ -1386,11 +1602,9 @@
         
         const convertedAmount = amount * rate;
         
-        // تحديث الأرصدة المحلية
         userBalances[fromCurrency] = fromBalance - amount;
         userBalances[toCurrency] = (userBalances[toCurrency] || 0) + convertedAmount;
         
-        // إضافة معاملة
         const transaction = {
           id: generateTransactionId(),
           type: 'convert',
@@ -1403,7 +1617,6 @@
           status: 'completed'
         };
         
-        // حفظ في Firebase
         await updateUserDataInFirebase({
           [`wallets.${fromCurrency}`]: userBalances[fromCurrency],
           [`wallets.${toCurrency}`]: userBalances[toCurrency]
@@ -1411,7 +1624,6 @@
         
         await saveTransactionToFirebase(transaction);
         
-        // تحديث التخزين المحلي
         updateLocalUserData();
         
         showCopyNotification(`✅ تم تحويل ${amount} ${fromCurrency} إلى ${convertedAmount.toFixed(4)} ${toCurrency}`);
@@ -1423,56 +1635,6 @@
       } catch (error) {
         console.error('❌ Error converting currency:', error);
         alert('حدث خطأ أثناء التحويل');
-      } finally {
-        hideWalletLoading();
-      }
-    }
-
-    async function sendMoney(toUserId, currency, amount) {
-      showWalletLoading();
-      
-      try {
-        const senderBalance = userBalances[currency] || 0;
-        
-        if (senderBalance < amount) {
-          alert('❌ رصيدك غير كافي');
-          return;
-        }
-        
-        // تحديث الأرصدة المحلية
-        userBalances[currency] = senderBalance - amount;
-        
-        // إضافة معاملة
-        const transaction = {
-          id: generateTransactionId(),
-          type: 'send',
-          amount: amount,
-          currency: currency,
-          toUserId: toUserId,
-          description: `إرسال إلى ${toUserId}`,
-          timestamp: new Date(),
-          status: 'completed'
-        };
-        
-        // حفظ في Firebase
-        await updateUserDataInFirebase({
-          [`wallets.${currency}`]: userBalances[currency]
-        });
-        
-        await saveTransactionToFirebase(transaction);
-        
-        // تحديث التخزين المحلي
-        updateLocalUserData();
-        
-        showCopyNotification(`✅ تم إرسال ${amount} ${currency} إلى المستخدم ${toUserId}`);
-        closeSendModal();
-        
-        updateWalletsListRealTime();
-        updateTotalBalance();
-        
-      } catch (error) {
-        console.error('❌ Error sending money:', error);
-        alert('حدث خطأ أثناء الإرسال');
       } finally {
         hideWalletLoading();
       }
@@ -1571,12 +1733,14 @@
 
     function openSendModal() {
       document.getElementById('walletSendModal').classList.add('open');
+      document.getElementById('userSearchResult').style.display = 'none';
     }
 
     function closeSendModal() {
       document.getElementById('walletSendModal').classList.remove('open');
       document.getElementById('sendToUserId').value = '';
       document.getElementById('sendAmount').value = '';
+      document.getElementById('userSearchResult').style.display = 'none';
     }
 
     function updateExchangeRate() {
@@ -1699,7 +1863,7 @@
           return;
         }
         
-        sendMoney(toUserId, currency, amount);
+        sendMoneyToUser(toUserId, currency, amount);
       });
 
       document.getElementById('walletTransferModal').addEventListener('click', function(e) {
