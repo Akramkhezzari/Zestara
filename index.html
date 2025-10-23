@@ -44,6 +44,7 @@
       padding: 0;
     }
 
+    /* ========== صفحة المحفظة الرقمية ========== */
     .wallet-page {
       padding: 15px;
       background: #ffffff;
@@ -224,6 +225,7 @@
       box-shadow: 0 6px 20px rgba(110,0,255,0.3);
     }
 
+    /* زر الإرسال الجديد بنفس نمط الأزرار النيون */
     .wallet-send-btn {
       flex: 1;
       padding: 12px;
@@ -527,6 +529,19 @@
       font-size: 18px;
     }
 
+    .wallet-switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-top: 1px solid var(--border-light);
+    }
+
+    .wallet-switch-row:first-child {
+      border-top: none;
+    }
+
+    /* نماذج التحويل والإعدادات */
     .transfer-form {
       display: flex;
       flex-direction: column;
@@ -588,6 +603,27 @@
       color: var(--warning);
     }
 
+    .firebase-status {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      background: var(--success);
+      color: white;
+      padding: 5px 10px;
+      border-radius: 15px;
+      font-size: 12px;
+      z-index: 1000;
+      display: none; /* إخفاء حالة Firebase */
+    }
+
+    .firebase-status.error {
+      background: var(--danger);
+    }
+
+    .firebase-status.warning {
+      background: var(--warning);
+    }
+
     .positive { color: var(--success); }
     .negative { color: var(--danger); }
     .wallet-coin-row:hover .price-change {
@@ -599,21 +635,10 @@
       opacity: 0.7;
       font-style: italic;
     }
-
-    .status-success {
-      background: rgba(38, 161, 123, 0.1);
-      border: 1px solid rgba(38, 161, 123, 0.3);
-      color: var(--success);
-    }
-
-    .status-error {
-      background: rgba(255, 71, 87, 0.1);
-      border: 1px solid rgba(255, 71, 87, 0.3);
-      color: var(--danger);
-    }
   </style>
 </head>
 <body>
+  <!-- ========== صفحة المحفظة الرقمية ========== -->
   <div class="wallet-page">
     <div class="wallet-frame">
       <div class="wallet-header">
@@ -639,18 +664,17 @@
       </div>
 
       <div class="wallet-content">
+        <!-- حالة التليجرام -->
         <div class="telegram-status" id="telegramStatus" style="display: none;">
           🔄 جاري الاتصال بالتليجرام...
         </div>
 
+        <!-- حالة تحميل الأسعار -->
         <div class="telegram-status" id="priceLoadingStatus" style="display: none;">
           📊 جاري تحميل الأسعار الحية من CoinGecko...
         </div>
 
-        <div class="telegram-status" id="databaseStatus" style="display: none;">
-          🗄️ جاري الاتصال بقاعدة البيانات...
-        </div>
-
+        <!-- الرصيد -->
         <div class="wallet-balance-card">
           <div class="wallet-balance-left">
             <div class="wallet-bal-label">رصيدك الإجمالي</div>
@@ -659,12 +683,14 @@
           <div class="wallet-bal-trend" id="walletTrend">+0.0%</div>
         </div>
 
+        <!-- الأزرار -->
         <div class="wallet-actions">
           <button class="wallet-neon-btn" id="walletTransferBtn">💱 تحويل</button>
           <button class="wallet-neon-btn" id="walletReceiveBtn">📥 استلام</button>
           <button class="wallet-send-btn" id="walletSendBtn">📤 إرسال</button>
         </div>
 
+        <!-- قائمة المحافظ -->
         <div>
           <div class="wallet-section-title">محافظك</div>
           
@@ -680,6 +706,7 @@
           </div>
           
           <div class="wallet-wallets" id="walletWalletsList">
+            <!-- المحافظ ستظهر هنا ديناميكياً -->
             <div class="wallet-coin-row">
               <div class="wallet-coin-left">
                 <div class="wallet-badge">⏳</div>
@@ -696,6 +723,7 @@
           </div>
         </div>
 
+        <!-- المعاملات -->
         <div>
           <div class="wallet-section-title">آخر المعاملات</div>
           
@@ -705,6 +733,7 @@
           </div>
           
           <div class="wallet-tx-list" id="walletTransactionList">
+            <!-- المعاملات ستظهر هنا ديناميكياً -->
           </div>
         </div>
 
@@ -712,10 +741,12 @@
       </div>
     </div>
 
+    <!-- Loading Spinner -->
     <div class="wallet-loading-spinner" id="walletLoadingSpinner">
       <div class="wallet-spinner"></div>
     </div>
 
+    <!-- نافذة تحويل العملات -->
     <div class="wallet-modal" id="walletTransferModal">
       <div class="wallet-modal-card">
         <h3>تحويل العملات</h3>
@@ -753,6 +784,7 @@
       </div>
     </div>
 
+    <!-- نافذة إرسال الأموال -->
     <div class="wallet-modal" id="walletSendModal">
       <div class="wallet-modal-card">
         <h3>إرسال الأموال</h3>
@@ -785,9 +817,14 @@
     </div>
   </div>
 
+  <!-- حالة Firebase - مخفية -->
+  <div id="firebaseStatus" class="firebase-status" style="display:none"></div>
+
   <script>
+    // ========== الإعدادات الأساسية ==========
     const BOT_TOKEN = "8323306928:AAG0Fkt0gPgrEJEFmf3itqyk2A7Xh8ZgVYI";
     
+    // ========== إعدادات Firebase الجديدة ==========
     const firebaseConfig = {
       apiKey: "AIzaSyBX8v0qIVjG-Z46fVDeEUDKcPxa_FQF9Qc",
       authDomain: "bnak-belaiba.firebaseapp.com",
@@ -797,18 +834,17 @@
       appId: "1:286736432059:web:ec1ed4292850f00008229e"
     };
 
+    // ========== تهيئة Firebase ==========
     let db;
-    let firebaseInitialized = false;
-
     try {
-      firebase.initializeApp(firebaseConfig);
+      const app = firebase.initializeApp(firebaseConfig);
       db = firebase.firestore();
-      firebaseInitialized = true;
       console.log('✅ Firebase initialized successfully');
     } catch (error) {
       console.error('❌ Firebase initialization error:', error);
     }
 
+    // ========== بيانات التطبيق ==========
     let currentUser = {
       id: null,
       firstName: 'مستخدم',
@@ -816,289 +852,88 @@
       username: null
     };
 
-    const defaultBalances = {
-      'BTC': 0.001,
-      'ETH': 0.01,
-      'BNB': 0.5,
-      'XRP': 100,
-      'ADA': 200,
-      'SOL': 0.5,
-      'DOT': 10,
-      'DOGE': 500,
-      'ZST': 50.0000,
-      'USDT': 10.00
-    };
-
+    // معلومات العملات الرقمية
     const coinInfo = {
-      'BTC': { name: 'Bitcoin', icon: '฿' },
-      'ETH': { name: 'Ethereum', icon: 'Ξ' },
-      'BNB': { name: 'Binance Coin', icon: 'B' },
-      'XRP': { name: 'Ripple', icon: 'X' },
-      'ADA': { name: 'Cardano', icon: 'A' },
-      'SOL': { name: 'Solana', icon: 'S' },
-      'DOT': { name: 'Polkadot', icon: 'D' },
-      'DOGE': { name: 'Dogecoin', icon: 'Ð' },
-      'ZST': { name: 'Zestara Coin', icon: 'Z' },
-      'USDT': { name: 'Tether', icon: '＄' }
+      'BTC': { name: 'Bitcoin', icon: '฿', cmcId: 1 },
+      'ETH': { name: 'Ethereum', icon: 'Ξ', cmcId: 1027 },
+      'BNB': { name: 'Binance Coin', icon: 'B', cmcId: 1839 },
+      'XRP': { name: 'Ripple', icon: 'X', cmcId: 52 },
+      'ADA': { name: 'Cardano', icon: 'A', cmcId: 2010 },
+      'SOL': { name: 'Solana', icon: 'S', cmcId: 5426 },
+      'DOT': { name: 'Polkadot', icon: 'D', cmcId: 6636 },
+      'DOGE': { name: 'Dogecoin', icon: 'Ð', cmcId: 74 },
+      'ZST': { name: 'Zestara Coin', icon: 'Z', price: 0.0002, change: 0.0 },
+      'USDT': { name: 'Tether', icon: '＄', price: 1.00, change: 0.0 }
     };
 
-    let userBalances = { ...defaultBalances };
+    // أرصدة افتراضية للمستخدمين الجدد
+    const defaultBalances = {
+      'BTC': 0.0052,
+      'ETH': 0.125,
+      'BNB': 1.5,
+      'XRP': 1500,
+      'ADA': 2500,
+      'SOL': 8.5,
+      'DOT': 120,
+      'DOGE': 5000,
+      'ZST': 100.0000,
+      'USDT': 25.50
+    };
+
+    // أسعار العملات الحية
     let livePrices = {};
     let exchangeRates = {};
+    let userBalances = { ...defaultBalances };
 
-    async function initializeTelegramUser() {
+    // ========== دوال إدارة Firebase بدون تسجيل دخول ==========
+    async function testFirebaseConnection() {
       try {
-        if (window.Telegram && Telegram.WebApp) {
-          const tg = Telegram.WebApp;
-          console.log('✅ Telegram WebApp detected');
-          
-          tg.expand();
-          tg.setBackgroundColor('#ffffff');
-          
-          const telegramUser = tg.initDataUnsafe.user;
-          
-          if (telegramUser && telegramUser.id) {
-            console.log('📱 Telegram user:', telegramUser);
-            
-            currentUser = {
-              id: telegramUser.id,
-              firstName: telegramUser.first_name || 'مستخدم',
-              lastName: telegramUser.last_name || '',
-              username: telegramUser.username,
-              languageCode: telegramUser.language_code,
-              isPremium: telegramUser.is_premium || false
-            };
-            
-            updateUserInterface(currentUser);
-            await registerOrLoadUser(currentUser);
-            
-          } else {
-            throw new Error('No Telegram user data');
-          }
-        } else {
-          throw new Error('No Telegram WebApp');
-        }
-      } catch (error) {
-        console.error('❌ Telegram init error:', error);
-        await useDemoMode();
-      }
-    }
-
-    async function registerOrLoadUser(userData) {
-      showWalletLoading();
-      
-      try {
-        if (!firebaseInitialized || !db) {
-          console.log('🔄 Firebase not available - using demo mode');
-          await initializeDemoData();
-          return;
+        if (!db) {
+          throw new Error('Firebase not initialized');
         }
 
-        const userId = userData.id.toString();
-        const userRef = db.collection('users').doc(userId);
-        const userDoc = await userRef.get();
-        
-        if (userDoc.exists) {
-          console.log('✅ User exists, loading data...');
-          await loadUserData(userId);
-        } else {
-          console.log('🆕 New user, creating account...');
-          await createNewUser(userData, userRef);
-        }
-        
-      } catch (error) {
-        console.error('❌ Error in user registration:', error);
-        await initializeDemoData();
-      } finally {
-        hideWalletLoading();
-      }
-    }
-
-    async function createNewUser(userData, userRef) {
-      const newUser = {
-        userId: userData.id,
-        firstName: userData.firstName,
-        lastName: userData.lastName,
-        username: userData.username,
-        languageCode: userData.languageCode,
-        isPremium: userData.isPremium,
-        wallets: { ...defaultBalances },
-        transactions: [{
-          type: 'receive',
-          amount: 50.00,
-          currency: 'ZST',
-          description: '🎁 هدية ترحيب من Zestara',
+        const testRef = db.collection('connectionTest').doc('walletApp');
+        await testRef.set({
+          status: 'connected',
           timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-          status: 'completed'
-        }],
-        registrationDate: firebase.firestore.FieldValue.serverTimestamp(),
-        lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
-        totalTransactions: 1,
-        totalReceived: 50.00
-      };
-      
-      await userRef.set(newUser);
-      console.log('🎉 New user created successfully!');
-      
-      userBalances = { ...defaultBalances };
-      userBalances.ZST += 50.00;
-      
-      await fetchLivePrices();
-      updateTransactionsList(newUser.transactions);
-      
-      showCopyNotification('🎉 أهلاً بك! تم إنشاء محفظتك بنجاح واستلمت 50 ZST هدية ترحيب!');
-    }
-
-    async function loadUserData(userId) {
-      try {
-        const userDoc = await db.collection('users').doc(userId).get();
-        
-        if (userDoc.exists) {
-          const userData = userDoc.data();
-          console.log('✅ User data loaded:', userData);
-          
-          if (userData.wallets) {
-            userBalances = { ...userData.wallets };
-          }
-          
-          await db.collection('users').doc(userId).update({
-            lastLogin: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          
-          await fetchLivePrices();
-          if (userData.transactions) {
-            updateTransactionsList(userData.transactions);
-          }
-          
-          showCopyNotification(`✅ أهلاً بعودتك، ${userData.firstName}!`);
-        }
-      } catch (error) {
-        console.error('❌ Error loading user data:', error);
-        await initializeDemoData();
-      }
-    }
-
-    async function useDemoMode() {
-      const demoUser = {
-        id: 5922049376,
-        firstName: 'Akram',
-        lastName: 'Khezzari', 
-        username: 'A_mja_d_0_5'
-      };
-      
-      currentUser = demoUser;
-      updateUserInterface(demoUser);
-      await initializeDemoData();
-    }
-
-    async function initializeDemoData() {
-      userBalances = { ...defaultBalances };
-      await fetchLivePrices();
-      showCopyNotification('🔸 الوضع التجريبي مفعل - البيانات محلية');
-    }
-
-    async function sendMoney(toUserId, currency, amount) {
-      showWalletLoading();
-      
-      try {
-        if (!firebaseInitialized || !db) {
-          throw new Error('قاعدة البيانات غير متاحة');
-        }
-
-        const receiverId = parseInt(toUserId);
-        if (isNaN(receiverId)) {
-          throw new Error('معرف المستخدم غير صحيح');
-        }
-
-        if (receiverId === currentUser.id) {
-          throw new Error('لا يمكن الإرسال لنفسك');
-        }
-
-        const senderRef = db.collection('users').doc(currentUser.id.toString());
-        const senderDoc = await senderRef.get();
-        
-        if (!senderDoc.exists) {
-          throw new Error('حسابك غير موجود');
-        }
-        
-        const senderData = senderDoc.data();
-        const senderBalance = senderData.wallets?.[currency] || 0;
-        
-        if (senderBalance < amount) {
-          throw new Error(`رصيدك غير كافي. رصيدك في ${currency}: ${senderBalance}`);
-        }
-        
-        const receiverRef = db.collection('users').doc(receiverId.toString());
-        const receiverDoc = await receiverRef.get();
-        
-        if (!receiverDoc.exists) {
-          throw new Error('المستخدم المستقبل غير موجود');
-        }
-        
-        const batch = db.batch();
-        
-        const newSenderBalance = senderBalance - amount;
-        batch.update(senderRef, {
-          [`wallets.${currency}`]: newSenderBalance
+          userAgent: navigator.userAgent
         });
         
-        const senderTransaction = {
-          type: 'send',
-          amount: amount,
-          currency: currency,
-          toUserId: receiverId,
-          description: `إرسال إلى ${receiverId}`,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-          status: 'completed'
-        };
-        batch.update(senderRef, {
-          transactions: firebase.firestore.FieldValue.arrayUnion(senderTransaction),
-          totalTransactions: firebase.firestore.FieldValue.increment(1)
-        });
-        
-        const receiverData = receiverDoc.data();
-        const receiverBalance = receiverData.wallets?.[currency] || 0;
-        const newReceiverBalance = receiverBalance + amount;
-        
-        batch.update(receiverRef, {
-          [`wallets.${currency}`]: newReceiverBalance
-        });
-        
-        const receiverTransaction = {
-          type: 'receive',
-          amount: amount,
-          currency: currency,
-          fromUserId: currentUser.id,
-          description: `استلام من ${currentUser.id}`,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-          status: 'completed'
-        };
-        batch.update(receiverRef, {
-          transactions: firebase.firestore.FieldValue.arrayUnion(receiverTransaction),
-          totalTransactions: firebase.firestore.FieldValue.increment(1),
-          totalReceived: firebase.firestore.FieldValue.increment(amount)
-        });
-        
-        await batch.commit();
-        
-        userBalances[currency] = newSenderBalance;
-        
-        showCopyNotification(`✅ تم إرسال ${amount} ${currency} إلى ${receiverId}`);
-        closeSendModal();
-        updateWalletsListRealTime();
-        updateTotalBalance();
-        
+        console.log('✅ Firebase connection test successful');
         return true;
-        
       } catch (error) {
-        console.error('❌ Error in sendMoney:', error);
-        alert(`❌ ${error.message}`);
+        console.error('❌ Firebase connection test failed:', error);
         return false;
-      } finally {
-        hideWalletLoading();
       }
     }
 
+    function updateFirebaseStatus(isConnected) {
+      // تم إخفاء حالة Firebase كما طلبت
+      const statusElement = document.getElementById('firebaseStatus');
+      statusElement.style.display = 'none';
+    }
+
+    // ========== دوال التخزين المحلي ==========
+    function saveToLocalStorage(userId, data) {
+      try {
+        localStorage.setItem(`wallet_${userId}`, JSON.stringify(data));
+        console.log('✅ Data saved to local storage');
+      } catch (error) {
+        console.error('❌ Error saving to local storage:', error);
+      }
+    }
+
+    function loadFromLocalStorage(userId) {
+      try {
+        const data = localStorage.getItem(`wallet_${userId}`);
+        return data ? JSON.parse(data) : null;
+      } catch (error) {
+        console.error('❌ Error loading from local storage:', error);
+        return null;
+      }
+    }
+
+    // ========== دوال CoinGecko API ==========
     async function fetchLivePrices() {
       showPriceLoading();
       
@@ -1112,15 +947,15 @@
         const data = await response.json();
         
         livePrices = {
-          'BTC': { price: data.bitcoin.usd, change: data.bitcoin.usd_24h_change || 0 },
-          'ETH': { price: data.ethereum.usd, change: data.ethereum.usd_24h_change || 0 },
-          'BNB': { price: data.binancecoin.usd, change: data.binancecoin.usd_24h_change || 0 },
-          'XRP': { price: data.ripple.usd, change: data.ripple.usd_24h_change || 0 },
-          'ADA': { price: data.cardano.usd, change: data.cardano.usd_24h_change || 0 },
-          'SOL': { price: data.solana.usd, change: data.solana.usd_24h_change || 0 },
-          'DOT': { price: data.polkadot.usd, change: data.polkadot.usd_24h_change || 0 },
-          'DOGE': { price: data.dogecoin.usd, change: data.dogecoin.usd_24h_change || 0 },
-          'USDT': { price: data.tether.usd, change: data.tether.usd_24h_change || 0 },
+          'BTC': { price: data.bitcoin.usd, change: data.bitcoin.usd_24h_change },
+          'ETH': { price: data.ethereum.usd, change: data.ethereum.usd_24h_change },
+          'BNB': { price: data.binancecoin.usd, change: data.binancecoin.usd_24h_change },
+          'XRP': { price: data.ripple.usd, change: data.ripple.usd_24h_change },
+          'ADA': { price: data.cardano.usd, change: data.cardano.usd_24h_change },
+          'SOL': { price: data.solana.usd, change: data.solana.usd_24h_change },
+          'DOT': { price: data.polkadot.usd, change: data.polkadot.usd_24h_change },
+          'DOGE': { price: data.dogecoin.usd, change: data.dogecoin.usd_24h_change },
+          'USDT': { price: data.tether.usd, change: data.tether.usd_24h_change },
           'ZST': { price: 0.0002, change: 0.0 }
         };
         
@@ -1161,7 +996,6 @@
     }
 
     function updateAllExchangeRates() {
-      exchangeRates = {};
       Object.keys(livePrices).forEach(fromSymbol => {
         Object.keys(livePrices).forEach(toSymbol => {
           if (fromSymbol !== toSymbol) {
@@ -1174,6 +1008,210 @@
       });
     }
 
+    // ========== دوال Telegram WebApp ==========
+    function initializeTelegramWebApp() {
+      try {
+        if (window.Telegram && Telegram.WebApp) {
+          const tg = Telegram.WebApp;
+          console.log('✅ Telegram WebApp detected');
+          
+          tg.expand();
+          tg.setBackgroundColor('#ffffff');
+          
+          const user = tg.initDataUnsafe.user;
+          console.log('Telegram user data:', user);
+          
+          if (user && user.id) {
+            document.getElementById('telegramStatus').style.display = 'block';
+            
+            currentUser = {
+              id: user.id,
+              firstName: user.first_name || 'مستخدم',
+              lastName: user.last_name || '',
+              username: user.username
+            };
+            
+            console.log('✅ User data loaded:', currentUser);
+            
+            updateUserInterface(currentUser);
+            initializeUserData(currentUser);
+            
+          } else {
+            useMockData();
+          }
+          
+        } else {
+          useMockData();
+        }
+      } catch (error) {
+        console.error('❌ Telegram WebApp Error:', error);
+        useMockData();
+      }
+    }
+
+    function useMockData() {
+      const mockUser = {
+        id: 5922049376,
+        firstName: 'Akram',
+        lastName: 'Khezzari', 
+        username: 'A_mja_d_0_5'
+      };
+      
+      currentUser = mockUser;
+      updateUserInterface(mockUser);
+      initializeUserData(mockUser);
+    }
+
+    // ========== دوال إدارة بيانات المستخدم من Firebase ==========
+    async function initializeUserData(userData) {
+      showWalletLoading();
+      
+      try {
+        // محاولة الاتصال بـ Firebase أولاً
+        const connectionSuccess = await testFirebaseConnection();
+        
+        if (connectionSuccess) {
+          console.log('✅ Using Firebase for data storage');
+          await loadOrCreateUserInFirebase(userData);
+          updateFirebaseStatus(true);
+        } else {
+          console.log('🔄 Using local storage instead of Firebase');
+          await loadUserFromLocalStorage(userData);
+          updateFirebaseStatus(false);
+        }
+        
+      } catch (error) {
+        console.error('❌ Error initializing user data:', error);
+        await loadUserFromLocalStorage(userData);
+        updateFirebaseStatus(false);
+      } finally {
+        hideWalletLoading();
+      }
+    }
+
+    async function loadOrCreateUserInFirebase(userData) {
+      try {
+        const userRef = db.collection('users').doc(userData.id.toString());
+        const userDoc = await userRef.get();
+        
+        if (!userDoc.exists) {
+          // مستخدم جديد - إنشاء حساب
+          const newUser = {
+            ...userData,
+            registrationDate: firebase.firestore.FieldValue.serverTimestamp(),
+            balance: 0,
+            wallets: { ...defaultBalances },
+            transactions: [{
+              id: generateTransactionId(),
+              type: 'receive',
+              amount: 100.00,
+              currency: 'ZST',
+              description: 'إيداع Zestara ابتدائي',
+              timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+              status: 'completed'
+            }],
+            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+          };
+          
+          await userRef.set(newUser);
+          console.log('✅ New user registered in Firebase:', userData.id);
+          userBalances = { ...defaultBalances };
+          
+          // حفظ نسخة محلية
+          saveToLocalStorage(userData.id, newUser);
+        } else {
+          console.log('✅ User loaded from Firebase:', userData.id);
+          const existingData = userDoc.data();
+          
+          // جلب جميع الأرصدة من Firebase
+          userBalances = existingData.wallets || { ...defaultBalances };
+          
+          // جلب جميع المعاملات من Firebase
+          const transactions = existingData.transactions || [];
+          updateTransactionsList(transactions);
+          
+          console.log('📊 Balances from Firebase:', userBalances);
+          console.log('📋 Transactions from Firebase:', transactions);
+        }
+        
+        await fetchLivePrices();
+        
+      } catch (error) {
+        console.error('❌ Error with Firebase, falling back to local:', error);
+        throw error;
+      }
+    }
+
+    async function loadUserFromLocalStorage(userData) {
+      const localData = loadFromLocalStorage(userData.id);
+      
+      if (localData) {
+        console.log('✅ User data loaded from local storage');
+        userBalances = localData.wallets || { ...defaultBalances };
+        updateTransactionsList(localData.transactions || []);
+      } else {
+        console.log('🔄 Creating new user with default data');
+        userBalances = { ...defaultBalances };
+        
+        const newUserData = {
+          ...userData,
+          wallets: userBalances,
+          transactions: [{
+            id: generateTransactionId(),
+            type: 'receive',
+            amount: 100.00,
+            currency: 'ZST',
+            description: 'إيداع Zestara ابتدائي',
+            timestamp: new Date(),
+            status: 'completed'
+          }]
+        };
+        
+        saveToLocalStorage(userData.id, newUserData);
+        updateTransactionsList(newUserData.transactions);
+      }
+      
+      await fetchLivePrices();
+    }
+
+    // ========== دوال تحديث البيانات في Firebase ==========
+    async function updateUserDataInFirebase(updates) {
+      try {
+        if (!db) return false;
+
+        const userRef = db.collection('users').doc(currentUser.id.toString());
+        await userRef.update({
+          ...updates,
+          lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log('✅ User data updated in Firebase');
+        return true;
+      } catch (error) {
+        console.error('❌ Error updating user data in Firebase:', error);
+        return false;
+      }
+    }
+
+    async function saveTransactionToFirebase(transaction) {
+      try {
+        if (!db) return false;
+
+        const userRef = db.collection('users').doc(currentUser.id.toString());
+        await userRef.update({
+          transactions: firebase.firestore.FieldValue.arrayUnion(transaction),
+          lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log('✅ Transaction saved to Firebase');
+        return true;
+      } catch (error) {
+        console.error('❌ Error saving transaction to Firebase:', error);
+        return false;
+      }
+    }
+
+    // ========== تحديث واجهة المحفظة ==========
     function updateWalletsListRealTime() {
       const walletsList = document.getElementById('walletWalletsList');
       
@@ -1198,6 +1236,7 @@
 
       walletsList.innerHTML = '';
 
+      // عرض جميع العملات من قاعدة البيانات
       Object.entries(coinInfo).forEach(([symbol, info]) => {
         const balance = userBalances[symbol] || 0;
         const liveData = livePrices[symbol];
@@ -1265,12 +1304,11 @@
       const toCurrency = document.getElementById('toCurrency');
       const sendFromCurrency = document.getElementById('sendFromCurrency');
       
-      if (!fromCurrency || !toCurrency || !sendFromCurrency) return;
-      
       fromCurrency.innerHTML = '';
       toCurrency.innerHTML = '';
       sendFromCurrency.innerHTML = '';
       
+      // استخدام الأرصدة الحقيقية من قاعدة البيانات
       Object.entries(coinInfo).forEach(([symbol, info]) => {
         const balance = userBalances[symbol] || 0;
         const optionText = `${symbol} - رصيدك: ${formatBalance(balance, symbol)}`;
@@ -1280,9 +1318,9 @@
         sendFromCurrency.innerHTML += `<option value="${symbol}">${optionText}</option>`;
       });
       
-      if (fromCurrency.options.length > 0) fromCurrency.value = 'BTC';
-      if (toCurrency.options.length > 0) toCurrency.value = 'USDT';
-      if (sendFromCurrency.options.length > 0) sendFromCurrency.value = 'BTC';
+      fromCurrency.value = 'BTC';
+      toCurrency.value = 'USDT';
+      sendFromCurrency.value = 'BTC';
     }
 
     function updateTransactionsList(transactions) {
@@ -1300,9 +1338,7 @@
         return timeB - timeA;
       });
       
-      const recentTransactions = sortedTransactions.slice(0, 10);
-      
-      recentTransactions.forEach(tx => {
+      sortedTransactions.forEach(tx => {
         const txElement = document.createElement('div');
         txElement.className = 'wallet-tx';
         
@@ -1328,6 +1364,130 @@
       });
     }
 
+    // ========== دوال التحويل والإرسال ==========
+    async function convertCurrency(fromCurrency, toCurrency, amount) {
+      showWalletLoading();
+      
+      try {
+        const fromBalance = userBalances[fromCurrency] || 0;
+        
+        if (fromBalance < amount) {
+          alert('❌ رصيدك غير كافي');
+          return;
+        }
+        
+        const rateKey = `${fromCurrency}_${toCurrency}`;
+        const rate = exchangeRates[rateKey];
+        
+        if (!rate) {
+          alert('❌ سعر الصرف غير متوفر');
+          return;
+        }
+        
+        const convertedAmount = amount * rate;
+        
+        // تحديث الأرصدة المحلية
+        userBalances[fromCurrency] = fromBalance - amount;
+        userBalances[toCurrency] = (userBalances[toCurrency] || 0) + convertedAmount;
+        
+        // إضافة معاملة
+        const transaction = {
+          id: generateTransactionId(),
+          type: 'convert',
+          amount: amount,
+          currency: fromCurrency,
+          convertedAmount: convertedAmount,
+          convertedCurrency: toCurrency,
+          description: `تحويل ${fromCurrency} إلى ${toCurrency}`,
+          timestamp: new Date(),
+          status: 'completed'
+        };
+        
+        // حفظ في Firebase
+        await updateUserDataInFirebase({
+          [`wallets.${fromCurrency}`]: userBalances[fromCurrency],
+          [`wallets.${toCurrency}`]: userBalances[toCurrency]
+        });
+        
+        await saveTransactionToFirebase(transaction);
+        
+        // تحديث التخزين المحلي
+        updateLocalUserData();
+        
+        showCopyNotification(`✅ تم تحويل ${amount} ${fromCurrency} إلى ${convertedAmount.toFixed(4)} ${toCurrency}`);
+        closeTransferModal();
+        
+        updateWalletsListRealTime();
+        updateTotalBalance();
+        
+      } catch (error) {
+        console.error('❌ Error converting currency:', error);
+        alert('حدث خطأ أثناء التحويل');
+      } finally {
+        hideWalletLoading();
+      }
+    }
+
+    async function sendMoney(toUserId, currency, amount) {
+      showWalletLoading();
+      
+      try {
+        const senderBalance = userBalances[currency] || 0;
+        
+        if (senderBalance < amount) {
+          alert('❌ رصيدك غير كافي');
+          return;
+        }
+        
+        // تحديث الأرصدة المحلية
+        userBalances[currency] = senderBalance - amount;
+        
+        // إضافة معاملة
+        const transaction = {
+          id: generateTransactionId(),
+          type: 'send',
+          amount: amount,
+          currency: currency,
+          toUserId: toUserId,
+          description: `إرسال إلى ${toUserId}`,
+          timestamp: new Date(),
+          status: 'completed'
+        };
+        
+        // حفظ في Firebase
+        await updateUserDataInFirebase({
+          [`wallets.${currency}`]: userBalances[currency]
+        });
+        
+        await saveTransactionToFirebase(transaction);
+        
+        // تحديث التخزين المحلي
+        updateLocalUserData();
+        
+        showCopyNotification(`✅ تم إرسال ${amount} ${currency} إلى المستخدم ${toUserId}`);
+        closeSendModal();
+        
+        updateWalletsListRealTime();
+        updateTotalBalance();
+        
+      } catch (error) {
+        console.error('❌ Error sending money:', error);
+        alert('حدث خطأ أثناء الإرسال');
+      } finally {
+        hideWalletLoading();
+      }
+    }
+
+    function updateLocalUserData() {
+      const userData = {
+        ...currentUser,
+        wallets: userBalances,
+        lastUpdated: new Date()
+      };
+      saveToLocalStorage(currentUser.id, userData);
+    }
+
+    // ========== دوال مساعدة ==========
     function formatBalance(balance, symbol) {
       if (symbol === 'BTC' || symbol === 'ETH') return balance.toFixed(6);
       if (symbol === 'USDT') return balance.toFixed(2);
@@ -1378,6 +1538,11 @@
       }
     }
 
+    function generateTransactionId() {
+      return 'tx_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+    }
+
+    // ========== دوال الواجهة ==========
     function showWalletLoading() {
       document.getElementById('walletLoadingSpinner').style.display = 'flex';
     }
@@ -1392,24 +1557,6 @@
 
     function hidePriceLoading() {
       document.getElementById('priceLoadingStatus').style.display = 'none';
-    }
-
-    function showCopyNotification(message) {
-      const notification = document.createElement('div');
-      notification.className = 'copy-notification';
-      notification.textContent = message;
-      document.body.appendChild(notification);
-      
-      setTimeout(() => {
-        notification.remove();
-      }, 2000);
-    }
-
-    function updateUserInterface(userData) {
-      const userName = userData.firstName + (userData.lastName ? ' ' + userData.lastName : '');
-      document.getElementById('walletUserName').textContent = userName;
-      document.getElementById('walletUserId').textContent = `id: ${userData.id}`;
-      document.getElementById('walletUserId').setAttribute('onclick', `copyUserId(${userData.id})`);
     }
 
     function openTransferModal() {
@@ -1430,28 +1577,6 @@
       document.getElementById('walletSendModal').classList.remove('open');
       document.getElementById('sendToUserId').value = '';
       document.getElementById('sendAmount').value = '';
-    }
-
-    function copyUserId(userId) {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(userId.toString()).then(() => {
-          showCopyNotification('تم نسخ المعرف: ' + userId);
-        }).catch(err => {
-          fallbackCopy(userId);
-        });
-      } else {
-        fallbackCopy(userId);
-      }
-    }
-
-    function fallbackCopy(userId) {
-      const textArea = document.createElement('textarea');
-      textArea.value = userId.toString();
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-      showCopyNotification('تم نسخ المعرف: ' + userId);
     }
 
     function updateExchangeRate() {
@@ -1476,18 +1601,61 @@
       }
     }
 
-    document.addEventListener('DOMContentLoaded', function() {
-      console.log('🚀 Starting Zestara Wallet...');
-      initializeTelegramUser();
+    function copyUserId(userId) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(userId.toString()).then(() => {
+          showCopyNotification('تم نسخ المعرف: ' + userId);
+        }).catch(err => {
+          fallbackCopy(userId);
+        });
+      } else {
+        fallbackCopy(userId);
+      }
+    }
+
+    function fallbackCopy(userId) {
+      const textArea = document.createElement('textarea');
+      textArea.value = userId.toString();
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      showCopyNotification('تم نسخ المعرف: ' + userId);
+    }
+
+    function showCopyNotification(message) {
+      const notification = document.createElement('div');
+      notification.className = 'copy-notification';
+      notification.textContent = message;
+      document.body.appendChild(notification);
       
       setTimeout(() => {
-        fetchLivePrices();
-      }, 1000);
+        notification.remove();
+      }, 2000);
+    }
+
+    function updateUserInterface(userData) {
+      const userName = userData.firstName + (userData.lastName ? ' ' + userData.lastName : '');
+      document.getElementById('walletUserName').textContent = userName;
+      document.getElementById('walletUserId').textContent = `id: ${userData.id}`;
+      document.getElementById('walletUserId').setAttribute('onclick', `copyUserId(${userData.id})`);
       
+      setTimeout(() => {
+        document.getElementById('telegramStatus').style.display = 'none';
+      }, 2000);
+    }
+
+    // ========== التهيئة ==========
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('🚀 Initializing Telegram WebApp...');
+      initializeTelegramWebApp();
+      
+      // بدء تحديث الأسعار الحية
       setInterval(() => {
         fetchLivePrices();
       }, 60000);
       
+      // أحداث الأزرار
       document.getElementById('walletTransferBtn').addEventListener('click', openTransferModal);
       document.getElementById('walletSendBtn').addEventListener('click', openSendModal);
       
@@ -1513,35 +1681,25 @@
           return;
         }
         
-        // convertCurrency function would go here
-        alert('خاصية التحويل بين العملات قيد التطوير');
+        convertCurrency(fromCurrency, toCurrency, amount);
       });
       
       document.getElementById('walletConfirmSend').addEventListener('click', function() {
-        const toUserId = document.getElementById('sendToUserId').value.trim();
+        const toUserId = document.getElementById('sendToUserId').value;
         const currency = document.getElementById('sendFromCurrency').value;
         const amount = parseFloat(document.getElementById('sendAmount').value);
         
-        if (!toUserId) {
-          alert('❌ يرجى إدخال معرف المستخدم المستقبل');
+        if (!toUserId || !amount) {
+          alert('يرجى ملء جميع الحقول');
           return;
         }
         
-        if (!amount || amount <= 0) {
-          alert('❌ يرجى إدخال مبلغ صحيح');
-          return;
-        }
-        
-        if (isNaN(amount)) {
-          alert('❌ المبلغ يجب أن يكون رقماً');
+        if (amount <= 0) {
+          alert('يرجى إدخال مبلغ صحيح');
           return;
         }
         
         sendMoney(toUserId, currency, amount);
-      });
-
-      document.getElementById('walletReceiveBtn').addEventListener('click', function() {
-        showCopyNotification(`📥 معرفك: ${currentUser.id} - شاركه مع الآخرين لإرسال الأموال لك`);
       });
 
       document.getElementById('walletTransferModal').addEventListener('click', function(e) {
@@ -1554,6 +1712,10 @@
         if (e.target === this) {
           closeSendModal();
         }
+      });
+
+      document.getElementById('walletReceiveBtn').addEventListener('click', function() {
+        showCopyNotification(`📥 معرفك: ${currentUser.id} - يمكن للآخرين استخدامه لإرسال الأموال لك`);
       });
     });
   </script>
