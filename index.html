@@ -13,7 +13,6 @@
   <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
   
   <style>
-    /* نفس الستايل الأصلي تماماً بدون تغيير */
     * {
       margin: 0;
       padding: 0;
@@ -45,6 +44,7 @@
       padding: 0;
     }
 
+    /* ========== صفحة المحفظة الرقمية ========== */
     .wallet-page {
       padding: 15px;
       background: #ffffff;
@@ -612,7 +612,7 @@
       border-radius: 15px;
       font-size: 12px;
       z-index: 1000;
-      display: none; /* إخفاء حالة Firebase */
+      display: none;
     }
 
     .firebase-status.error {
@@ -633,6 +633,35 @@
     .price-loading {
       opacity: 0.7;
       font-style: italic;
+    }
+
+    .user-search-result {
+      background: var(--bg-lighter);
+      padding: 10px;
+      border-radius: 8px;
+      margin: 5px 0;
+      border: 1px solid var(--border-light);
+    }
+
+    .user-search-result.found {
+      border-color: var(--success);
+      background: rgba(38, 161, 123, 0.05);
+    }
+
+    .user-search-result.not-found {
+      border-color: var(--danger);
+      background: rgba(255, 71, 87, 0.05);
+    }
+
+    .registration-success {
+      background: rgba(38, 161, 123, 0.1);
+      border: 1px solid rgba(38, 161, 123, 0.3);
+      border-radius: 10px;
+      padding: 10px;
+      margin: 10px 0;
+      text-align: center;
+      font-size: 12px;
+      color: var(--success);
     }
   </style>
 </head>
@@ -666,6 +695,11 @@
         <!-- حالة التليجرام -->
         <div class="telegram-status" id="telegramStatus" style="display: none;">
           🔄 جاري الاتصال بالتليجرام...
+        </div>
+
+        <!-- حالة التسجيل -->
+        <div class="registration-success" id="registrationStatus" style="display: none;">
+          ✅ جاري إنشاء حسابك وتجهيز محفظتك...
         </div>
 
         <!-- حالة تحميل الأسعار -->
@@ -800,6 +834,9 @@
           <div class="form-group">
             <label class="form-label">إلى معرف المستخدم</label>
             <input type="text" class="form-input" id="sendToUserId" placeholder="أدخل معرف المستخدم">
+            <div id="userSearchResult" class="user-search-result" style="display:none">
+              <!-- نتائج البحث عن المستخدم -->
+            </div>
           </div>
 
           <div class="form-group">
@@ -823,7 +860,7 @@
     // ========== الإعدادات الأساسية ==========
     const BOT_TOKEN = "8323306928:AAG0Fkt0gPgrEJEFmf3itqyk2A7Xh8ZgVYI";
     
-    // ========== إعدادات Firebase الجديدة ==========
+    // ========== إعدادات Firebase ==========
     const firebaseConfig = {
       apiKey: "AIzaSyBX8v0qIVjG-Z46fVDeEUDKcPxa_FQF9Qc",
       authDomain: "bnak-belaiba.firebaseapp.com",
@@ -836,28 +873,55 @@
     // ========== تهيئة Firebase ==========
     let db;
     try {
-      // التحقق من أن Firebase غير مهيأ مسبقاً
-      if (!firebase.apps.length) {
-        const app = firebase.initializeApp(firebaseConfig);
-      }
+      const app = firebase.initializeApp(firebaseConfig);
       db = firebase.firestore();
-      
-      // إعداد إعدادات Firestore
-      db.settings({
-        cacheSizeBytes: firebase.firestore.CACHE_SIZE_UNLIMITED
-      });
-      
       console.log('✅ Firebase initialized successfully');
     } catch (error) {
       console.error('❌ Firebase initialization error:', error);
     }
 
+    // ========== هيكل قاعدة البيانات ==========
+    const DATABASE_STRUCTURE = {
+      users: {
+        fields: ['userId', 'telegramId', 'username', 'firstName', 'lastName', 'languageCode', 
+                'registrationDate', 'lastLogin', 'status', 'balance', 'wallets', 'preferences'],
+        indexes: ['telegramId', 'registrationDate', 'status']
+      },
+      wallets: {
+        fields: ['walletId', 'userId', 'currency', 'balance', 'address', 'createdAt', 'updatedAt'],
+        indexes: ['userId', 'currency']
+      },
+      transactions: {
+        fields: ['transactionId', 'userId', 'type', 'amount', 'currency', 'fromUserId', 'toUserId',
+                'status', 'description', 'timestamp', 'fee', 'network', 'hash'],
+        indexes: ['userId', 'type', 'status', 'timestamp']
+      },
+      notifications: {
+        fields: ['notificationId', 'userId', 'type', 'title', 'message', 'isRead', 'createdAt', 'actionUrl'],
+        indexes: ['userId', 'isRead', 'createdAt']
+      },
+      currencies: {
+        fields: ['currencyId', 'symbol', 'name', 'icon', 'price', 'change24h', 'marketCap', 'lastUpdated', 'isActive'],
+        indexes: ['symbol', 'isActive']
+      },
+      system: {
+        fields: ['settingId', 'key', 'value', 'description', 'updatedAt'],
+        indexes: ['key']
+      },
+      activityLogs: {
+        fields: ['logId', 'userId', 'action', 'details', 'ipAddress', 'userAgent', 'timestamp'],
+        indexes: ['userId', 'action', 'timestamp']
+      }
+    };
+
     // ========== بيانات التطبيق ==========
     let currentUser = {
       id: null,
+      telegramId: null,
       firstName: 'مستخدم',
       lastName: '',
-      username: null
+      username: null,
+      languageCode: 'ar'
     };
 
     // معلومات العملات الرقمية
@@ -893,55 +957,867 @@
     let exchangeRates = {};
     let userBalances = { ...defaultBalances };
 
-    // ========== دوال إدارة Firebase بدون تسجيل دخول ==========
-    async function testFirebaseConnection() {
+    // ========== نظام إدارة قاعدة البيانات ==========
+    class DatabaseManager {
+      constructor() {
+        this.initialized = false;
+        this.init();
+      }
+
+      async init() {
+        try {
+          await this.initializeCollections();
+          await this.initializeSystemSettings();
+          await this.initializeCurrencies();
+          this.initialized = true;
+          console.log('✅ Database Manager initialized successfully');
+        } catch (error) {
+          console.error('❌ Database Manager initialization failed:', error);
+        }
+      }
+
+      async initializeCollections() {
+        const collections = Object.keys(DATABASE_STRUCTURE);
+        for (const collection of collections) {
+          try {
+            const testDoc = await db.collection(collection).doc('init').get();
+            if (!testDoc.exists) {
+              await db.collection(collection).doc('init').set({
+                initialized: true,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+              });
+            }
+          } catch (error) {
+            console.warn(`⚠️ Could not initialize collection ${collection}:`, error);
+          }
+        }
+      }
+
+      async initializeSystemSettings() {
+        const defaultSettings = {
+          'app_version': '1.0.0',
+          'maintenance_mode': false,
+          'registration_enabled': true,
+          'min_deposit_amount': 0.001,
+          'min_withdrawal_amount': 0.01,
+          'transaction_fee_percentage': 0.5,
+          'last_price_update': null,
+          'supported_currencies': Object.keys(coinInfo)
+        };
+
+        for (const [key, value] of Object.entries(defaultSettings)) {
+          try {
+            await db.collection('system').doc(key).set({
+              value: value,
+              description: this.getSettingDescription(key),
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+          } catch (error) {
+            console.error(`❌ Error setting system setting ${key}:`, error);
+          }
+        }
+      }
+
+      async initializeCurrencies() {
+        for (const [symbol, info] of Object.entries(coinInfo)) {
+          try {
+            await db.collection('currencies').doc(symbol).set({
+              symbol: symbol,
+              name: info.name,
+              icon: info.icon,
+              price: info.price || 0,
+              change24h: info.change || 0,
+              isActive: true,
+              lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+          } catch (error) {
+            console.error(`❌ Error initializing currency ${symbol}:`, error);
+          }
+        }
+      }
+
+      getSettingDescription(key) {
+        const descriptions = {
+          'app_version': 'إصدار التطبيق الحالي',
+          'maintenance_mode': 'وضع الصيانة (مفعل/معطل)',
+          'registration_enabled': 'تفعيل تسجيل المستخدمين الجدد',
+          'min_deposit_amount': 'الحد الأدنى للإيداع',
+          'min_withdrawal_amount': 'الحد الأدنى للسحب',
+          'transaction_fee_percentage': 'نسبة عمليات التحويل',
+          'last_price_update': 'آخر تحديث للأسعار',
+          'supported_currencies': 'العملات المدعومة في النظام'
+        };
+        return descriptions[key] || 'إعداد نظام';
+      }
+    }
+
+    // ========== نظام إدارة المستخدمين ==========
+    class UserManager {
+      constructor() {
+        this.dbManager = new DatabaseManager();
+      }
+
+      async initializeTelegramUser(telegramUser) {
+        showWalletLoading();
+        document.getElementById('registrationStatus').style.display = 'block';
+        
+        try {
+          if (!telegramUser || !telegramUser.id) {
+            throw new Error('بيانات المستخدم غير صالحة');
+          }
+
+          let userData = await this.getUserByTelegramId(telegramUser.id);
+          
+          if (!userData) {
+            userData = await this.createNewUser(telegramUser);
+            console.log('✅ New user registered:', userData.userId);
+          } else {
+            await this.updateUserLogin(userData.userId);
+            console.log('✅ Existing user logged in:', userData.userId);
+          }
+
+          await this.loadUserWallets(userData.userId);
+          await this.loadUserTransactions(userData.userId);
+          
+          this.updateCurrentUser(userData);
+          updateUserInterface(userData);
+          
+          await this.logUserActivity(userData.userId, 'USER_LOGIN', {
+            platform: 'Telegram WebApp',
+            userAgent: navigator.userAgent
+          });
+
+          return userData;
+
+        } catch (error) {
+          console.error('❌ Error initializing Telegram user:', error);
+          throw error;
+        } finally {
+          hideWalletLoading();
+          setTimeout(() => {
+            document.getElementById('registrationStatus').style.display = 'none';
+          }, 3000);
+        }
+      }
+
+      async getUserByTelegramId(telegramId) {
+        try {
+          const snapshot = await db.collection('users')
+            .where('telegramId', '==', telegramId)
+            .limit(1)
+            .get();
+
+          if (!snapshot.empty) {
+            const doc = snapshot.docs[0];
+            return { userId: doc.id, ...doc.data() };
+          }
+          return null;
+        } catch (error) {
+          console.error('❌ Error getting user by Telegram ID:', error);
+          return null;
+        }
+      }
+
+      async createNewUser(telegramUser) {
+        const userId = this.generateUserId();
+        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+        
+        const userData = {
+          userId: userId,
+          telegramId: telegramUser.id,
+          username: telegramUser.username || null,
+          firstName: telegramUser.first_name || 'مستخدم',
+          lastName: telegramUser.last_name || '',
+          languageCode: telegramUser.language_code || 'ar',
+          registrationDate: timestamp,
+          lastLogin: timestamp,
+          status: 'active',
+          balance: 0,
+          wallets: this.initializeUserWallets(),
+          preferences: {
+            notifications: true,
+            language: 'ar',
+            currency: 'USD',
+            theme: 'light'
+          },
+          security: {
+            lastPasswordChange: null,
+            twoFactorEnabled: false
+          }
+        };
+
+        await db.collection('users').doc(userId).set(userData);
+        await this.createUserWallets(userId, userData.wallets);
+        await this.sendWelcomeNotification(userId);
+        await this.logUserActivity(userId, 'USER_REGISTRATION', {
+          source: 'Telegram WebApp',
+          referral: null
+        });
+
+        return userData;
+      }
+
+      initializeUserWallets() {
+        const wallets = {};
+        Object.keys(defaultBalances).forEach(currency => {
+          wallets[currency] = {
+            balance: defaultBalances[currency],
+            address: this.generateWalletAddress(currency),
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+        });
+        return wallets;
+      }
+
+      async createUserWallets(userId, wallets) {
+        for (const [currency, walletData] of Object.entries(wallets)) {
+          try {
+            const walletId = `${userId}_${currency}`;
+            await db.collection('wallets').doc(walletId).set({
+              walletId: walletId,
+              userId: userId,
+              currency: currency,
+              balance: walletData.balance,
+              address: walletData.address,
+              createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          } catch (error) {
+            console.error(`❌ Error creating wallet ${currency} for user ${userId}:`, error);
+          }
+        }
+      }
+
+      async loadUserWallets(userId) {
+        try {
+          const snapshot = await db.collection('wallets')
+            .where('userId', '==', userId)
+            .get();
+
+          const wallets = {};
+          snapshot.forEach(doc => {
+            const walletData = doc.data();
+            wallets[walletData.currency] = walletData.balance;
+          });
+
+          userBalances = { ...defaultBalances, ...wallets };
+          return wallets;
+        } catch (error) {
+          console.error('❌ Error loading user wallets:', error);
+          return {};
+        }
+      }
+
+      async loadUserTransactions(userId) {
+        try {
+          const snapshot = await db.collection('transactions')
+            .where('userId', '==', userId)
+            .orderBy('timestamp', 'desc')
+            .limit(20)
+            .get();
+
+          const transactions = [];
+          snapshot.forEach(doc => {
+            transactions.push(doc.data());
+          });
+
+          updateTransactionsList(transactions);
+          return transactions;
+        } catch (error) {
+          console.error('❌ Error loading user transactions:', error);
+          return [];
+        }
+      }
+
+      async updateUserLogin(userId) {
+        try {
+          await db.collection('users').doc(userId).update({
+            lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
+            'status': 'active'
+          });
+        } catch (error) {
+          console.error('❌ Error updating user login:', error);
+        }
+      }
+
+      async sendWelcomeNotification(userId) {
+        try {
+          const notificationId = this.generateNotificationId();
+          await db.collection('notifications').doc(notificationId).set({
+            notificationId: notificationId,
+            userId: userId,
+            type: 'welcome',
+            title: 'مرحباً بك في Zestara! 🎉',
+            message: 'شكراً لانضمامك إلينا. تم إنشاء محفظتك الرقمية بنجاح وتم إيداع رصيد ترحيبي.',
+            isRead: false,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            actionUrl: '/wallet'
+          });
+        } catch (error) {
+          console.error('❌ Error sending welcome notification:', error);
+        }
+      }
+
+      async logUserActivity(userId, action, details = {}) {
+        try {
+          const logId = this.generateLogId();
+          await db.collection('activityLogs').doc(logId).set({
+            logId: logId,
+            userId: userId,
+            action: action,
+            details: details,
+            ipAddress: 'N/A',
+            userAgent: navigator.userAgent,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        } catch (error) {
+          console.error('❌ Error logging user activity:', error);
+        }
+      }
+
+      updateCurrentUser(userData) {
+        currentUser = {
+          id: userData.userId,
+          telegramId: userData.telegramId,
+          firstName: userData.firstName,
+          lastName: userData.lastName,
+          username: userData.username,
+          languageCode: userData.languageCode
+        };
+      }
+
+      generateUserId() {
+        return 'user_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+      }
+
+      generateWalletAddress(currency) {
+        const prefix = currency === 'BTC' ? '1' : currency === 'ETH' ? '0x' : 'Z';
+        return prefix + Math.random().toString(36).substr(2, 15).toUpperCase();
+      }
+
+      generateNotificationId() {
+        return 'notif_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+      }
+
+      generateLogId() {
+        return 'log_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+      }
+    }
+
+    // ========== دوال إضافية مطلوبة ==========
+    async function searchUser(userId) {
+      const resultElement = document.getElementById('userSearchResult');
+      
+      if (!userId || userId.trim() === '') {
+        resultElement.style.display = 'none';
+        return;
+      }
+      
+      const targetUserId = userId.trim();
+      
+      if (parseInt(targetUserId) === currentUser.telegramId) {
+        resultElement.innerHTML = '❌ لا يمكن إرسال الأموال لنفسك';
+        resultElement.className = 'user-search-result not-found';
+        resultElement.style.display = 'block';
+        return;
+      }
+      
       try {
         if (!db) {
-          throw new Error('Firebase not initialized');
+          resultElement.innerHTML = '❌ قاعدة البيانات غير متاحة';
+          resultElement.className = 'user-search-result not-found';
+          resultElement.style.display = 'block';
+          return;
         }
+        
+        const userRef = db.collection('users').doc(targetUserId);
+        const userDoc = await userRef.get();
+        
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          const userName = `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.username || 'مستخدم';
+          
+          resultElement.innerHTML = `✅ تم العثور على المستخدم: ${userName} (${targetUserId})`;
+          resultElement.className = 'user-search-result found';
+          resultElement.style.display = 'block';
+        } else {
+          resultElement.innerHTML = '❌ لم يتم العثور على المستخدم';
+          resultElement.className = 'user-search-result not-found';
+          resultElement.style.display = 'block';
+        }
+      } catch (error) {
+        console.error('❌ Error searching for user:', error);
+        resultElement.innerHTML = '❌ خطأ في البحث عن المستخدم';
+        resultElement.className = 'user-search-result not-found';
+        resultElement.style.display = 'block';
+      }
+    }
 
-        const testRef = db.collection('connectionTest').doc('walletApp');
-        await testRef.set({
-          status: 'connected',
-          timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-          userAgent: navigator.userAgent
+    async function sendMoneyToUser(toUserId, currency, amount) {
+      showWalletLoading();
+      
+      try {
+        if (!toUserId || !currency || !amount) {
+          alert('❌ يرجى ملء جميع الحقول');
+          return;
+        }
+        
+        if (amount <= 0) {
+          alert('❌ يرجى إدخال مبلغ صحيح');
+          return;
+        }
+        
+        const senderBalance = userBalances[currency] || 0;
+        
+        if (senderBalance < amount) {
+          alert('❌ رصيدك غير كافي');
+          return;
+        }
+        
+        const receiverRef = db.collection('users').doc(toUserId);
+        const receiverDoc = await receiverRef.get();
+        
+        if (!receiverDoc.exists) {
+          alert('❌ المستخدم المستقبل غير موجود');
+          return;
+        }
+        
+        if (parseInt(toUserId) === currentUser.telegramId) {
+          alert('❌ لا يمكن إرسال الأموال لنفسك');
+          return;
+        }
+        
+        const transactionId = generateTransactionId();
+        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+        
+        const senderTransaction = {
+          id: transactionId,
+          type: 'send',
+          amount: amount,
+          currency: currency,
+          toUserId: toUserId,
+          description: `إرسال إلى ${toUserId}`,
+          timestamp: timestamp,
+          status: 'completed'
+        };
+        
+        const receiverTransaction = {
+          id: transactionId,
+          type: 'receive',
+          amount: amount,
+          currency: currency,
+          fromUserId: currentUser.id,
+          description: `استلام من ${currentUser.id}`,
+          timestamp: timestamp,
+          status: 'completed'
+        };
+        
+        const batch = db.batch();
+        
+        const senderRef = db.collection('users').doc(currentUser.id);
+        batch.update(senderRef, {
+          [`wallets.${currency}`]: firebase.firestore.FieldValue.increment(-amount),
+          transactions: firebase.firestore.FieldValue.arrayUnion(senderTransaction),
+          lastUpdated: timestamp
         });
         
-        console.log('✅ Firebase connection test successful');
-        return true;
+        batch.update(receiverRef, {
+          [`wallets.${currency}`]: firebase.firestore.FieldValue.increment(amount),
+          transactions: firebase.firestore.FieldValue.arrayUnion(receiverTransaction),
+          lastUpdated: timestamp
+        });
+        
+        await batch.commit();
+        
+        userBalances[currency] = senderBalance - amount;
+        
+        updateLocalUserData();
+        
+        showCopyNotification(`✅ تم إرسال ${amount} ${currency} إلى المستخدم ${toUserId}`);
+        closeSendModal();
+        
+        updateWalletsListRealTime();
+        updateTotalBalance();
+        
+        console.log('✅ Money sent successfully:', { toUserId, currency, amount });
+        
       } catch (error) {
-        console.error('❌ Firebase connection test failed:', error);
-        return false;
+        console.error('❌ Error sending money:', error);
+        alert('حدث خطأ أثناء الإرسال: ' + error.message);
+      } finally {
+        hideWalletLoading();
       }
     }
 
-    function updateFirebaseStatus(isConnected) {
-      // تم إخفاء حالة Firebase كما طلبت
-      const statusElement = document.getElementById('firebaseStatus');
-      statusElement.style.display = 'none';
-    }
-
-    // ========== دوال التخزين المحلي ==========
-    function saveToLocalStorage(userId, data) {
+    async function convertCurrency(fromCurrency, toCurrency, amount) {
+      showWalletLoading();
+      
       try {
-        localStorage.setItem(`wallet_${userId}`, JSON.stringify(data));
-        console.log('✅ Data saved to local storage');
+        const fromBalance = userBalances[fromCurrency] || 0;
+        
+        if (fromBalance < amount) {
+          alert('❌ رصيدك غير كافي');
+          return;
+        }
+        
+        const rateKey = `${fromCurrency}_${toCurrency}`;
+        const rate = exchangeRates[rateKey];
+        
+        if (!rate) {
+          alert('❌ سعر الصرف غير متوفر');
+          return;
+        }
+        
+        const convertedAmount = amount * rate;
+        
+        userBalances[fromCurrency] = fromBalance - amount;
+        userBalances[toCurrency] = (userBalances[toCurrency] || 0) + convertedAmount;
+        
+        const transaction = {
+          id: generateTransactionId(),
+          type: 'convert',
+          amount: amount,
+          currency: fromCurrency,
+          convertedAmount: convertedAmount,
+          convertedCurrency: toCurrency,
+          description: `تحويل ${fromCurrency} إلى ${toCurrency}`,
+          timestamp: new Date(),
+          status: 'completed'
+        };
+        
+        await updateUserDataInFirebase({
+          [`wallets.${fromCurrency}`]: userBalances[fromCurrency],
+          [`wallets.${toCurrency}`]: userBalances[toCurrency]
+        });
+        
+        await saveTransactionToFirebase(transaction);
+        
+        updateLocalUserData();
+        
+        showCopyNotification(`✅ تم تحويل ${amount} ${fromCurrency} إلى ${convertedAmount.toFixed(4)} ${toCurrency}`);
+        closeTransferModal();
+        
+        updateWalletsListRealTime();
+        updateTotalBalance();
+        
       } catch (error) {
-        console.error('❌ Error saving to local storage:', error);
+        console.error('❌ Error converting currency:', error);
+        alert('حدث خطأ أثناء التحويل');
+      } finally {
+        hideWalletLoading();
       }
     }
 
-    function loadFromLocalStorage(userId) {
+    // ========== دوال المساعدة ==========
+    function updateUserInterface(userData) {
+      const userName = userData.firstName + (userData.lastName ? ' ' + userData.lastName : '');
+      document.getElementById('walletUserName').textContent = userName;
+      document.getElementById('walletUserId').textContent = `id: ${userData.telegramId}`;
+      document.getElementById('walletUserId').setAttribute('onclick', `copyUserId(${userData.telegramId})`);
+      
+      setTimeout(() => {
+        document.getElementById('telegramStatus').style.display = 'none';
+      }, 2000);
+    }
+
+    function updateWalletsListRealTime() {
+      const walletsList = document.getElementById('walletWalletsList');
+      
+      if (Object.keys(livePrices).length === 0) {
+        walletsList.innerHTML = `
+          <div class="wallet-coin-row">
+            <div class="wallet-coin-left">
+              <div class="wallet-badge">⏳</div>
+              <div class="wallet-coin-meta">
+                <div class="n">جاري تحميل الأسعار</div>
+                <div class="s">من CoinGecko</div>
+              </div>
+            </div>
+            <div class="wallet-coin-val">
+              <div class="qty price-loading">...</div>
+              <div class="fiat price-loading">جاري التحديث</div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      walletsList.innerHTML = '';
+
+      Object.entries(coinInfo).forEach(([symbol, info]) => {
+        const balance = userBalances[symbol] || 0;
+        const liveData = livePrices[symbol];
+        
+        if (!liveData) return;
+        
+        const usdValue = balance * liveData.price;
+        const changeClass = liveData.change >= 0 ? 'positive' : 'negative';
+        const changeIcon = liveData.change >= 0 ? '↗' : '↘';
+
+        const walletElement = document.createElement('div');
+        walletElement.className = 'wallet-coin-row';
+        walletElement.innerHTML = `
+          <div class="wallet-coin-left">
+            <div class="wallet-badge" style="background: linear-gradient(135deg, ${getCoinColor(symbol)});">
+              ${info.icon}
+            </div>
+            <div class="wallet-coin-meta">
+              <div class="n">${info.name}</div>
+              <div class="s">${symbol}</div>
+              <div class="price-change ${changeClass}" style="font-size:10px;margin-top:2px;">
+                ${changeIcon} ${Math.abs(liveData.change).toFixed(1)}%
+              </div>
+            </div>
+          </div>
+          <div class="wallet-coin-val">
+            <div class="qty">${formatBalance(balance, symbol)} ${symbol}</div>
+            <div class="fiat">≈ $${usdValue.toFixed(2)}</div>
+            <div class="price" style="font-size:10px;color:var(--text-light);margin-top:2px">
+              $${formatPrice(liveData.price)}
+            </div>
+          </div>
+        `;
+        walletsList.appendChild(walletElement);
+      });
+    }
+
+    function updateTotalBalance() {
+      let totalBalance = 0;
+      let totalChange = 0;
+      let count = 0;
+      
+      Object.entries(userBalances).forEach(([symbol, balance]) => {
+        const liveData = livePrices[symbol];
+        if (liveData) {
+          totalBalance += balance * liveData.price;
+          totalChange += liveData.change;
+          count++;
+        }
+      });
+      
+      const avgChange = count > 0 ? totalChange / count : 0;
+      
+      document.getElementById('walletTotalBalance').textContent = `$${totalBalance.toFixed(2)}`;
+      document.getElementById('walletTrend').textContent = `${avgChange >= 0 ? '+' : ''}${avgChange.toFixed(1)}%`;
+      document.getElementById('walletTrend').style.color = avgChange >= 0 ? 'var(--success)' : 'var(--danger)';
+      document.getElementById('walletTrend').style.background = avgChange >= 0 ? 
+        'rgba(38, 161, 123, 0.1)' : 'rgba(255, 71, 87, 0.1)';
+      document.getElementById('walletTrend').style.borderColor = avgChange >= 0 ? 
+        'rgba(38, 161, 123, 0.2)' : 'rgba(255, 71, 87, 0.2)';
+    }
+
+    function updateTransferDropdowns() {
+      const fromCurrency = document.getElementById('fromCurrency');
+      const toCurrency = document.getElementById('toCurrency');
+      const sendFromCurrency = document.getElementById('sendFromCurrency');
+      
+      fromCurrency.innerHTML = '';
+      toCurrency.innerHTML = '';
+      sendFromCurrency.innerHTML = '';
+      
+      Object.entries(coinInfo).forEach(([symbol, info]) => {
+        const balance = userBalances[symbol] || 0;
+        const optionText = `${symbol} - رصيدك: ${formatBalance(balance, symbol)}`;
+        
+        fromCurrency.innerHTML += `<option value="${symbol}">${optionText}</option>`;
+        toCurrency.innerHTML += `<option value="${symbol}">${optionText}</option>`;
+        sendFromCurrency.innerHTML += `<option value="${symbol}">${optionText}</option>`;
+      });
+      
+      fromCurrency.value = 'BTC';
+      toCurrency.value = 'USDT';
+      sendFromCurrency.value = 'BTC';
+    }
+
+    function updateTransactionsList(transactions) {
+      const transactionsList = document.getElementById('walletTransactionList');
+      transactionsList.innerHTML = '';
+      
+      if (!transactions || transactions.length === 0) {
+        transactionsList.innerHTML = '<div style="text-align:center;color:var(--text-light);padding:20px;">لا توجد معاملات حتى الآن</div>';
+        return;
+      }
+      
+      const sortedTransactions = [...transactions].sort((a, b) => {
+        const timeA = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp);
+        const timeB = b.timestamp?.toDate ? b.timestamp.toDate() : new Date(b.timestamp);
+        return timeB - timeA;
+      });
+      
+      sortedTransactions.slice(0, 10).forEach(tx => {
+        const txElement = document.createElement('div');
+        txElement.className = 'wallet-tx';
+        
+        let description = tx.description;
+        if (tx.type === 'send' && tx.toUserId) {
+          description = `إرسال إلى ${tx.toUserId}`;
+        } else if (tx.type === 'receive' && tx.fromUserId) {
+          description = `استلام من ${tx.fromUserId}`;
+        } else if (tx.type === 'convert') {
+          description = `تحويل ${tx.currency} إلى ${tx.convertedCurrency}`;
+        }
+        
+        const time = formatTime(tx.timestamp);
+        
+        txElement.innerHTML = `
+          <div class="left">
+            <div class="meta">${description} • ${time}</div>
+            <div class="meta">${tx.currency}${tx.convertedCurrency ? ' → ' + tx.convertedCurrency : ''}</div>
+          </div>
+          <div class="amt ${tx.type}">${tx.type === 'receive' ? '+' : '-'}${tx.amount.toFixed(2)}</div>
+        `;
+        transactionsList.appendChild(txElement);
+      });
+    }
+
+    function formatBalance(balance, symbol) {
+      if (symbol === 'BTC' || symbol === 'ETH') return balance.toFixed(6);
+      if (symbol === 'USDT') return balance.toFixed(2);
+      if (balance < 1) return balance.toFixed(4);
+      if (balance < 1000) return balance.toFixed(2);
+      return balance.toFixed(0);
+    }
+
+    function formatPrice(price) {
+      if (price < 0.01) return price.toFixed(6);
+      if (price < 1) return price.toFixed(4);
+      if (price < 1000) return price.toFixed(2);
+      return price.toFixed(0);
+    }
+
+    function getCoinColor(symbol) {
+      const colors = {
+        'BTC': '#f7931a, #ffc350',
+        'ETH': '#627eea, #8fa3e9',
+        'BNB': '#f3ba2f, #f8d156',
+        'XRP': '#23292f, #4a5568',
+        'ADA': '#0033ad, #306ccc',
+        'SOL': '#00ffbd, #66ffd1',
+        'DOT': '#e6007a, #ff4da6',
+        'DOGE': '#c2a633, #e6d16c',
+        'ZST': '#0072ff, #ff2d9e',
+        'USDT': '#26a17b, #4cd4a7'
+      };
+      return colors[symbol] || '#0072ff, #ff2d9e';
+    }
+
+    function formatTime(timestamp) {
+      if (!timestamp) return 'الآن';
+      
       try {
-        const data = localStorage.getItem(`wallet_${userId}`);
-        return data ? JSON.parse(data) : null;
+        const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        
+        if (diffMins < 1) return 'الآن';
+        if (diffMins < 60) return `قبل ${diffMins} دقيقة`;
+        if (diffHours < 24) return `قبل ${diffHours} ساعة`;
+        return date.toLocaleDateString('ar-EG');
       } catch (error) {
-        console.error('❌ Error loading from local storage:', error);
-        return null;
+        return 'الآن';
       }
     }
 
-    // ========== دوال CoinGecko API ==========
+    function generateTransactionId() {
+      return 'tx_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+    }
+
+    function showWalletLoading() {
+      document.getElementById('walletLoadingSpinner').style.display = 'flex';
+    }
+
+    function hideWalletLoading() {
+      document.getElementById('walletLoadingSpinner').style.display = 'none';
+    }
+
+    function showPriceLoading() {
+      document.getElementById('priceLoadingStatus').style.display = 'block';
+    }
+
+    function hidePriceLoading() {
+      document.getElementById('priceLoadingStatus').style.display = 'none';
+    }
+
+    function openTransferModal() {
+      document.getElementById('walletTransferModal').classList.add('open');
+      updateExchangeRate();
+    }
+
+    function closeTransferModal() {
+      document.getElementById('walletTransferModal').classList.remove('open');
+      document.getElementById('transferAmount').value = '';
+    }
+
+    function openSendModal() {
+      document.getElementById('walletSendModal').classList.add('open');
+      document.getElementById('userSearchResult').style.display = 'none';
+    }
+
+    function closeSendModal() {
+      document.getElementById('walletSendModal').classList.remove('open');
+      document.getElementById('sendToUserId').value = '';
+      document.getElementById('sendAmount').value = '';
+      document.getElementById('userSearchResult').style.display = 'none';
+    }
+
+    function updateExchangeRate() {
+      const from = document.getElementById('fromCurrency').value;
+      const to = document.getElementById('toCurrency').value;
+      
+      if (from === to) {
+        document.getElementById('exchangeRateDisplay').textContent = "لا يمكن التحويل بين نفس العملة";
+        return;
+      }
+      
+      const rateKey = `${from}_${to}`;
+      const rate = exchangeRates[rateKey];
+      const amount = parseFloat(document.getElementById('transferAmount').value) || 1;
+      const converted = amount * rate;
+      
+      if (rate) {
+        document.getElementById('exchangeRateDisplay').textContent = 
+          `1 ${from} = ${rate.toFixed(8)} ${to} | ${amount} ${from} = ${converted.toFixed(8)} ${to}`;
+      } else {
+        document.getElementById('exchangeRateDisplay').textContent = "سعر الصرف غير متوفر";
+      }
+    }
+
+    function copyUserId(userId) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(userId.toString()).then(() => {
+          showCopyNotification('تم نسخ المعرف: ' + userId);
+        }).catch(err => {
+          fallbackCopy(userId);
+        });
+      } else {
+        fallbackCopy(userId);
+      }
+    }
+
+    function fallbackCopy(userId) {
+      const textArea = document.createElement('textarea');
+      textArea.value = userId.toString();
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      showCopyNotification('تم نسخ المعرف: ' + userId);
+    }
+
+    function showCopyNotification(message) {
+      const notification = document.createElement('div');
+      notification.className = 'copy-notification';
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      
+      setTimeout(() => {
+        notification.remove();
+      }, 2000);
+    }
+
     async function fetchLivePrices() {
       showPriceLoading();
       
@@ -1016,339 +1892,17 @@
       });
     }
 
-    // ========== دوال Telegram WebApp ==========
-    function initializeTelegramWebApp() {
-      try {
-        if (window.Telegram && Telegram.WebApp) {
-          const tg = Telegram.WebApp;
-          console.log('✅ Telegram WebApp detected');
-          
-          tg.expand();
-          tg.setBackgroundColor('#ffffff');
-          tg.enableClosingConfirmation();
-          
-          const user = tg.initDataUnsafe.user;
-          console.log('Telegram user data:', user);
-          
-          if (user && user.id) {
-            document.getElementById('telegramStatus').style.display = 'block';
-            
-            currentUser = {
-              id: user.id,
-              firstName: user.first_name || 'مستخدم',
-              lastName: user.last_name || '',
-              username: user.username
-            };
-            
-            console.log('✅ User data loaded:', currentUser);
-            
-            updateUserInterface(currentUser);
-            initializeUserData(currentUser);
-            
-          } else {
-            useMockData();
-          }
-          
-        } else {
-          useMockData();
-        }
-      } catch (error) {
-        console.error('❌ Telegram WebApp Error:', error);
-        useMockData();
-      }
-    }
-
-    function useMockData() {
-      const mockUser = {
-        id: 5922049376,
-        firstName: 'Akram',
-        lastName: 'Khezzari', 
-        username: 'A_mja_d_0_5'
-      };
-      
-      currentUser = mockUser;
-      updateUserInterface(mockUser);
-      initializeUserData(mockUser);
-    }
-
-    // ========== دوال إدارة بيانات المستخدم من Firebase ==========
-    async function initializeUserData(userData) {
-      showWalletLoading();
-      
-      try {
-        // محاولة الاتصال بـ Firebase أولاً
-        const connectionSuccess = await testFirebaseConnection();
-        
-        if (connectionSuccess) {
-          console.log('✅ Using Firebase for data storage');
-          await loadOrCreateUserInFirebase(userData);
-          updateFirebaseStatus(true);
-        } else {
-          console.log('🔄 Using local storage instead of Firebase');
-          await loadUserFromLocalStorage(userData);
-          updateFirebaseStatus(false);
-        }
-        
-      } catch (error) {
-        console.error('❌ Error initializing user data:', error);
-        await loadUserFromLocalStorage(userData);
-        updateFirebaseStatus(false);
-      } finally {
-        hideWalletLoading();
-      }
-    }
-
-    async function loadOrCreateUserInFirebase(userData) {
-      try {
-        const userRef = db.collection('users').doc(userData.id.toString());
-        const userDoc = await userRef.get();
-        
-        if (!userDoc.exists) {
-          // مستخدم جديد - إنشاء حساب
-          const newUser = {
-            ...userData,
-            registrationDate: firebase.firestore.FieldValue.serverTimestamp(),
-            balance: 0,
-            wallets: { ...defaultBalances },
-            transactions: [{
-              id: generateTransactionId(),
-              type: 'receive',
-              amount: 100.00,
-              currency: 'ZST',
-              description: 'إيداع Zestara ابتدائي',
-              timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-              status: 'completed'
-            }],
-            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-          };
-          
-          await userRef.set(newUser);
-          console.log('✅ New user registered in Firebase:', userData.id);
-          userBalances = { ...defaultBalances };
-          
-          // حفظ نسخة محلية
-          saveToLocalStorage(userData.id, newUser);
-        } else {
-          console.log('✅ User loaded from Firebase:', userData.id);
-          const existingData = userDoc.data();
-          
-          // جلب جميع الأرصدة من Firebase
-          userBalances = existingData.wallets || { ...defaultBalances };
-          
-          // جلب جميع المعاملات من Firebase
-          const transactions = existingData.transactions || [];
-          updateTransactionsList(transactions);
-          
-          console.log('📊 Balances from Firebase:', userBalances);
-          console.log('📋 Transactions from Firebase:', transactions);
-        }
-        
-        await fetchLivePrices();
-        
-      } catch (error) {
-        console.error('❌ Error with Firebase, falling back to local:', error);
-        throw error;
-      }
-    }
-
-    async function loadUserFromLocalStorage(userData) {
-      const localData = loadFromLocalStorage(userData.id);
-      
-      if (localData) {
-        console.log('✅ User data loaded from local storage');
-        userBalances = localData.wallets || { ...defaultBalances };
-        updateTransactionsList(localData.transactions || []);
-      } else {
-        console.log('🔄 Creating new user with default data');
-        userBalances = { ...defaultBalances };
-        
-        const newUserData = {
-          ...userData,
-          wallets: userBalances,
-          transactions: [{
-            id: generateTransactionId(),
-            type: 'receive',
-            amount: 100.00,
-            currency: 'ZST',
-            description: 'إيداع Zestara ابتدائي',
-            timestamp: new Date(),
-            status: 'completed'
-          }]
-        };
-        
-        saveToLocalStorage(userData.id, newUserData);
-        updateTransactionsList(newUserData.transactions);
-      }
-      
-      await fetchLivePrices();
-    }
-
-    // ========== دوال تحديث البيانات في Firebase ==========
-    async function updateUserDataInFirebase(updates) {
-      try {
-        if (!db) return false;
-
-        const userRef = db.collection('users').doc(currentUser.id.toString());
-        await userRef.update({
-          ...updates,
-          lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
-        console.log('✅ User data updated in Firebase');
-        return true;
-      } catch (error) {
-        console.error('❌ Error updating user data in Firebase:', error);
-        return false;
-      }
-    }
-
-    async function saveTransactionToFirebase(transaction) {
-      try {
-        if (!db) return false;
-
-        const userRef = db.collection('users').doc(currentUser.id.toString());
-        await userRef.update({
-          transactions: firebase.firestore.FieldValue.arrayUnion(transaction),
-          lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
-        console.log('✅ Transaction saved to Firebase');
-        return true;
-      } catch (error) {
-        console.error('❌ Error saving transaction to Firebase:', error);
-        return false;
-      }
-    }
-
-    // ========== إرسال الأموال بين المستخدمين ==========
-    async function sendMoneyToUser(toUserId, currency, amount) {
-      showWalletLoading();
-      
-      try {
-        // التحقق من صحة البيانات
-        if (!toUserId || !currency || !amount) {
-          alert('❌ يرجى ملء جميع الحقول');
-          return;
-        }
-        
-        if (amount <= 0) {
-          alert('❌ يرجى إدخال مبلغ صحيح');
-          return;
-        }
-        
-        const senderBalance = userBalances[currency] || 0;
-        
-        if (senderBalance < amount) {
-          alert('❌ رصيدك غير كافي');
-          return;
-        }
-        
-        // التحقق من وجود المستخدم المستقبل
-        const receiverRef = db.collection('users').doc(toUserId);
-        const receiverDoc = await receiverRef.get();
-        
-        let receiverExists = true;
-        if (!receiverDoc.exists) {
-          receiverExists = false;
-          // إنشاء مستخدم جديد تلقائياً
-          const newUser = {
-            id: parseInt(toUserId),
-            firstName: 'مستخدم',
-            lastName: toUserId,
-            username: null,
-            registrationDate: firebase.firestore.FieldValue.serverTimestamp(),
-            wallets: { ...defaultBalances, [currency]: amount },
-            transactions: [],
-            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-          };
-          await receiverRef.set(newUser);
-        }
-        
-        // معاملة المرسل
-        const senderTransaction = {
-          id: generateTransactionId(),
-          type: 'send',
-          amount: amount,
-          currency: currency,
-          toUserId: toUserId,
-          description: `إرسال إلى ${toUserId}`,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-          status: 'completed'
-        };
-        
-        // معاملة المستقبل
-        const receiverTransaction = {
-          id: generateTransactionId(),
-          type: 'receive',
-          amount: amount,
-          currency: currency,
-          fromUserId: currentUser.id,
-          description: `استلام من ${currentUser.id}`,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-          status: 'completed'
-        };
-        
-        // تحديث أرصدة المرسل والمستقبل
-        const batch = db.batch();
-        
-        // تحديث رصيد المرسل
-        const senderRef = db.collection('users').doc(currentUser.id.toString());
-        batch.update(senderRef, {
-          [`wallets.${currency}`]: firebase.firestore.FieldValue.increment(-amount),
-          transactions: firebase.firestore.FieldValue.arrayUnion(senderTransaction),
-          lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
-        // تحديث رصيد المستقبل
-        if (receiverExists) {
-          batch.update(receiverRef, {
-            [`wallets.${currency}`]: firebase.firestore.FieldValue.increment(amount),
-            transactions: firebase.firestore.FieldValue.arrayUnion(receiverTransaction),
-            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-          });
-        } else {
-          batch.update(receiverRef, {
-            transactions: firebase.firestore.FieldValue.arrayUnion(receiverTransaction),
-            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-          });
-        }
-        
-        // تنفيذ جميع التحديثات معاً
-        await batch.commit();
-        
-        // تحديث البيانات المحلية
-        userBalances[currency] = senderBalance - amount;
-        
-        // تحديث التخزين المحلي
-        updateLocalUserData();
-        
-        showCopyNotification(`✅ تم إرسال ${amount} ${currency} إلى المستخدم ${toUserId}`);
-        closeSendModal();
-        
-        updateWalletsListRealTime();
-        updateTotalBalance();
-        
-      } catch (error) {
-        console.error('❌ Error sending money:', error);
-        alert('حدث خطأ أثناء الإرسال: ' + error.message);
-      } finally {
-        hideWalletLoading();
-      }
-    }
-
-    // ========== تحديث الرصيد التلقائي كل 3 ثواني ==========
     function startBalanceAutoRefresh() {
       setInterval(async () => {
         try {
           if (db && currentUser.id) {
-            const userRef = db.collection('users').doc(currentUser.id.toString());
+            const userRef = db.collection('users').doc(currentUser.id);
             const userDoc = await userRef.get();
             
             if (userDoc.exists) {
               const userData = userDoc.data();
               const newBalances = userData.wallets || {};
               
-              // تحديث الأرصدة إذا تغيرت
               let balancesChanged = false;
               Object.keys(newBalances).forEach(currency => {
                 if (newBalances[currency] !== userBalances[currency]) {
@@ -1368,70 +1922,42 @@
         } catch (error) {
           console.error('❌ Error in auto-refresh:', error);
         }
-      }, 3000); // كل 3 ثواني
+      }, 3000);
     }
 
-    // ========== دوال التحويل والإرسال ==========
-    async function convertCurrency(fromCurrency, toCurrency, amount) {
-      showWalletLoading();
-      
+    async function updateUserDataInFirebase(updates) {
       try {
-        const fromBalance = userBalances[fromCurrency] || 0;
-        
-        if (fromBalance < amount) {
-          alert('❌ رصيدك غير كافي');
-          return;
-        }
-        
-        const rateKey = `${fromCurrency}_${toCurrency}`;
-        const rate = exchangeRates[rateKey];
-        
-        if (!rate) {
-          alert('❌ سعر الصرف غير متوفر');
-          return;
-        }
-        
-        const convertedAmount = amount * rate;
-        
-        // تحديث الأرصدة المحلية
-        userBalances[fromCurrency] = fromBalance - amount;
-        userBalances[toCurrency] = (userBalances[toCurrency] || 0) + convertedAmount;
-        
-        // إضافة معاملة
-        const transaction = {
-          id: generateTransactionId(),
-          type: 'convert',
-          amount: amount,
-          currency: fromCurrency,
-          convertedAmount: convertedAmount,
-          convertedCurrency: toCurrency,
-          description: `تحويل ${fromCurrency} إلى ${toCurrency}`,
-          timestamp: new Date(),
-          status: 'completed'
-        };
-        
-        // حفظ في Firebase
-        await updateUserDataInFirebase({
-          [`wallets.${fromCurrency}`]: userBalances[fromCurrency],
-          [`wallets.${toCurrency}`]: userBalances[toCurrency]
+        if (!db) return false;
+
+        const userRef = db.collection('users').doc(currentUser.id);
+        await userRef.update({
+          ...updates,
+          lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
         });
         
-        await saveTransactionToFirebase(transaction);
-        
-        // تحديث التخزين المحلي
-        updateLocalUserData();
-        
-        showCopyNotification(`✅ تم تحويل ${amount} ${fromCurrency} إلى ${convertedAmount.toFixed(4)} ${toCurrency}`);
-        closeTransferModal();
-        
-        updateWalletsListRealTime();
-        updateTotalBalance();
-        
+        console.log('✅ User data updated in Firebase');
+        return true;
       } catch (error) {
-        console.error('❌ Error converting currency:', error);
-        alert('حدث خطأ أثناء التحويل');
-      } finally {
-        hideWalletLoading();
+        console.error('❌ Error updating user data in Firebase:', error);
+        return false;
+      }
+    }
+
+    async function saveTransactionToFirebase(transaction) {
+      try {
+        if (!db) return false;
+
+        const userRef = db.collection('users').doc(currentUser.id);
+        await userRef.update({
+          transactions: firebase.firestore.FieldValue.arrayUnion(transaction),
+          lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log('✅ Transaction saved to Firebase');
+        return true;
+      } catch (error) {
+        console.error('❌ Error saving transaction to Firebase:', error);
+        return false;
       }
     }
 
@@ -1441,26 +1967,82 @@
         wallets: userBalances,
         lastUpdated: new Date()
       };
-      saveToLocalStorage(currentUser.id, userData);
+      localStorage.setItem(`wallet_${currentUser.id}`, JSON.stringify(userData));
     }
 
-    // ========== باقي الدوال بدون تغيير ==========
-    // ... (أضف هنا جميع الدوال الأخرى التي كانت في الكود الأصلي)
-
     // ========== التهيئة ==========
+    let userManager;
+
+    function initializeTelegramWebApp() {
+      try {
+        if (window.Telegram && Telegram.WebApp) {
+          const tg = Telegram.WebApp;
+          console.log('✅ Telegram WebApp detected');
+          
+          tg.expand();
+          tg.setBackgroundColor('#ffffff');
+          
+          const telegramUser = tg.initDataUnsafe.user;
+          console.log('Telegram user data:', telegramUser);
+          
+          if (telegramUser && telegramUser.id) {
+            document.getElementById('telegramStatus').style.display = 'block';
+            
+            userManager = new UserManager();
+            
+            userManager.initializeTelegramUser(telegramUser)
+              .then(() => {
+                console.log('✅ User initialization completed');
+                fetchLivePrices();
+                startBalanceAutoRefresh();
+              })
+              .catch(error => {
+                console.error('❌ User initialization failed:', error);
+                useMockData();
+              });
+            
+          } else {
+            useMockData();
+          }
+          
+        } else {
+          useMockData();
+        }
+      } catch (error) {
+        console.error('❌ Telegram WebApp Error:', error);
+        useMockData();
+      }
+    }
+
+    function useMockData() {
+      const mockTelegramUser = {
+        id: 5922049376,
+        first_name: 'Akram',
+        last_name: 'Khezzari', 
+        username: 'A_mja_d_0_5',
+        language_code: 'ar'
+      };
+      
+      userManager = new UserManager();
+      userManager.initializeTelegramUser(mockTelegramUser)
+        .then(() => {
+          console.log('✅ Mock user initialization completed');
+          fetchLivePrices();
+          startBalanceAutoRefresh();
+        })
+        .catch(error => {
+          console.error('❌ Mock user initialization failed:', error);
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
       console.log('🚀 Initializing Telegram WebApp...');
       initializeTelegramWebApp();
       
-      // بدء تحديث الأسعار الحية
       setInterval(() => {
         fetchLivePrices();
       }, 60000);
       
-      // بدء تحديث الرصيد التلقائي
-      startBalanceAutoRefresh();
-      
-      // أحداث الأزرار
       document.getElementById('walletTransferBtn').addEventListener('click', openTransferModal);
       document.getElementById('walletSendBtn').addEventListener('click', openSendModal);
       
@@ -1507,6 +2089,10 @@
         sendMoneyToUser(toUserId, currency, amount);
       });
 
+      document.getElementById('sendToUserId').addEventListener('input', function() {
+        searchUser(this.value);
+      });
+
       document.getElementById('walletTransferModal').addEventListener('click', function(e) {
         if (e.target === this) {
           closeTransferModal();
@@ -1520,11 +2106,9 @@
       });
 
       document.getElementById('walletReceiveBtn').addEventListener('click', function() {
-        showCopyNotification(`📥 معرفك: ${currentUser.id} - يمكن للآخرين استخدامه لإرسال الأموال لك`);
+        showCopyNotification(`📥 معرفك: ${currentUser.telegramId} - يمكن للآخرين استخدامه لإرسال الأموال لك`);
       });
     });
-
-    // ... (أضف هنا جميع الدوال المساعدة الأخرى)
   </script>
 </body>
 </html>
